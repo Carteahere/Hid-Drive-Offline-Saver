@@ -54,9 +54,10 @@ npm start
 
 | 阶段 | 说明 |
 | --- | --- |
-| 采集 | 通过 Chrome DevTools Protocol（CDP）`Network` 域记录页面实际发出的每个请求，用 `Network.getResponseBody` 抓取响应体，按 URL 存为 `manifest.json` + 资源文件 |
-| 离线 | 用 Node `http` 服务器把存档挂在 `http://127.0.0.1:<port>/`，页面内对原站的绝对路径引用通过 `webRequest` 重定向到本地副本 |
-| HID | `setPermissionCheckHandler` + `setDevicePermissionHandler` 放行 `hid` 权限；`select-hid-device` 事件提供设备选择；`disable-hid-blocklist` 开关关闭 Chromium HID 黑名单 |
+| 整体架构 | 基于 [Electron](https://www.electronjs.org/) 的桌面应用：主进程负责采集、存档与本地服务器，渲染进程提供图形界面 |
+| 采集 | 主进程通过 Chrome DevTools Protocol（CDP）`Network` 域记录页面实际发出的每个请求，用 `Network.getResponseBody` 抓取响应体，按 URL 存为 `manifest.json` + 资源文件 |
+| 离线 | 主进程用 Node `http` 服务器把存档挂在 `http://127.0.0.1:<port>/`，页面内对原站的绝对路径引用通过 `webRequest` 重定向到本地副本 |
+| HID | 借助 Electron 的 WebHID 支持：`setPermissionCheckHandler` + `setDevicePermissionHandler` 放行 `hid` 权限；`select-hid-device` 事件提供设备选择；`disable-hid-blocklist` 开关关闭 Chromium HID 黑名单 |
 
 ### 已知兼容性说明
 
