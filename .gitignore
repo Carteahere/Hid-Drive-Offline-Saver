@@ -1,5 +1,6 @@
 node_modules/
 test_out/
+release/
 *.log
 e2e.log
 .DS_Store
