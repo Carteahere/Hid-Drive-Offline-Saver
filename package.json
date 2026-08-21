@@ -1,0 +1,18 @@
+{
+  "name": "hid-drive-offline-saver",
+  "version": "1.0.0",
+  "description": "离线保存鼠标键盘等Hid设备网页驱动并本地运行",
+  "main": "main.js",
+  "license": "MIT",
+  "author": "Carteahere",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SadYuyuko/Hid-Drive-Offline-Saver.git"
+  },
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}

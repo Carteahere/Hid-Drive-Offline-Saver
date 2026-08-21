@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>网页HID离线保存器</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #777; font-size: 12px; margin-bottom: 18px; }
+  .row { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; padding: 9px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  button { padding: 9px 14px; border: 0; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .primary { background: #2b6cb0; color: #fff; }
+  .primary:hover { background: #2c5282; }
+  .ghost { background: #e2e8f0; color: #2d3748; }
+  .ghost:hover { background: #cbd5e0; }
+  .danger { background: #fff; color: #c53030; border: 1px solid #feb2b2; }
+  .danger:hover { background: #fff5f5; }
+  .list { margin-top: 18px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
+  .card .info { flex: 1; min-width: 0; }
+  .card .url { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .meta { font-size: 12px; color: #888; margin-top: 4px; }
+  .card button { flex-shrink: 0; }
+  .empty { color: #999; text-align: center; padding: 30px 0; }
+  .tip { background: #ebf8ff; border: 1px solid #bee3f8; color: #2c5282; border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+  code { background: #edf2f7; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .msg { border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-top: 10px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: #fff5f5; border: 1px solid #feb2b2; color: #c53030; }
+  .msg.info { background: #ebf8ff; border: 1px solid #bee3f8; color: #2c5282; }
+  .confirmbar { border: 1px solid #fed7e2; background: #fff5f7; border-radius: 6px; padding: 12px; margin-top: 10px; font-size: 13px; display: none; }
+  .confirmbar.show { display: block; }
+  .confirmbar button { margin-left: 8px; }
+  .danger-solid { background: #c53030; color: #fff; }
+  .danger-solid:hover { background: #9b2c2c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>网页HID离线保存器</h1>
+  <div class="sub">把WebHID设备(鼠标/键盘等)网页驱动整站离线保存，离线照常HID控制</div>
+
+  <div class="tip">
+    <b>使用方法：</b>输入网址点击采集 → 在弹出的采集窗口里随便操作(连接设备或点进所需功能页等)使其加载所需资源 → 点击左上角采集键或
+    <code>Ctrl+Shift+S</code> 保存。<br>
+    后续点击打开离线版即可离线使用WebHID设备(仅限Chromium内核浏览器或本软件)。
+  </div>
+
+  <div class="row">
+    <input type="text" id="url" placeholder="http://example.com">
+    <button class="primary" id="capture">采集</button>
+  </div>
+  <div class="msg error" id="msgError"></div>
+  <div class="msg info" id="msgInfo"></div>
+
+  <div class="list" id="list"></div>
+  <div class="confirmbar" id="confirmBar"></div>
+  <div style="margin-top:14px; text-align:right;">
+    <button class="ghost" id="folder">打开存档文件夹</button>
+  </div>
+</div>
+
+<script>
+  const listEl = document.getElementById('list')
+  const urlInput = document.getElementById('url')
+  const captureBtn = document.getElementById('capture')
+  const msgError = document.getElementById('msgError')
+  const msgInfo = document.getElementById('msgInfo')
+  const confirmBar = document.getElementById('confirmBar')
+
+  let msgTimer = null
+
+  function showMsg (el, text) {
+    el.textContent = text
+    el.classList.add('show')
+    clearTimeout(msgTimer)
+    msgTimer = setTimeout(() => el.classList.remove('show'), 4000)
+  }
+
+  function showError (text) { showMsg(msgError, text) }
+  function showInfo (text) { showMsg(msgInfo, text) }
+
+  function askDelete (url, onOk) {
+    confirmBar.innerHTML = ''
+    const span = document.createElement('span')
+    span.textContent = `确定删除存档「${url}」？`
+    const okBtn = document.createElement('button')
+    okBtn.className = 'danger-solid'
+    okBtn.textContent = '确定'
+    const cancelBtn = document.createElement('button')
+    cancelBtn.className = 'ghost'
+    cancelBtn.textContent = '取消'
+    okBtn.addEventListener('click', () => {
+      confirmBar.classList.remove('show')
+      onOk()
+    })
+    cancelBtn.addEventListener('click', () => confirmBar.classList.remove('show'))
+    confirmBar.appendChild(span)
+    confirmBar.appendChild(okBtn)
+    confirmBar.appendChild(cancelBtn)
+    confirmBar.classList.add('show')
+  }
+
+  function fmtSize (n) {
+    if (n < 1024) return n + ' B'
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+    return (n / 1024 / 1024).toFixed(1) + ' MB'
+  }
+
+  async function refresh () {
+    const archives = await window.api.listArchives()
+    if (archives.length === 0) {
+      listEl.innerHTML = '<div class="empty">还没有存档，先在上方采集一个吧</div>'
+      return
+    }
+    listEl.innerHTML = archives.map(a => `
+      <div class="card">
+        <div class="info">
+          <div class="url">${a.entryUrl}</div>
+          <div class="meta">${new Date(a.capturedAt).toLocaleString()} · ${a.fileCount} 个资源 · ${fmtSize(a.size)}</div>
+        </div>
+        <button class="primary open" data-id="${a.id}">打开离线版</button>
+        <button class="danger del" data-id="${a.id}">删除</button>
+      </div>
+    `).join('')
+
+    listEl.querySelectorAll('.open').forEach(b => b.addEventListener('click', () => window.api.openArchive(b.dataset.id)))
+    listEl.querySelectorAll('.del').forEach(b => b.addEventListener('click', () => {
+      const url = b.closest('.card').querySelector('.url').textContent
+      askDelete(url, async () => {
+        await window.api.deleteArchive(b.dataset.id)
+        refresh()
+      })
+    }))
+  }
+
+  captureBtn.addEventListener('click', async () => {
+    const url = urlInput.value.trim()
+    if (!url) { showError('请输入网址'); return }
+    captureBtn.disabled = true
+    try {
+      await window.api.captureStart(url)
+    } catch (e) {
+      showError('采集启动失败: ' + e.message)
+    } finally {
+      captureBtn.disabled = false
+    }
+  })
+
+  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') captureBtn.click() })
+  document.getElementById('folder').addEventListener('click', () => window.api.openFolder())
+  window.api.onArchivesChanged(() => refresh())
+  refresh()
+</script>
+</body>
+</html>
