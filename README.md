@@ -62,16 +62,7 @@ npm start
 - 部分站点会拒绝 HTTP/2 或经系统代理访问，软件已默认禁用 HTTP/2 并绕过系统代理（`disable-http2`、`no-proxy-server`）
 - 若目标站需要登录态，请在采集窗口内先完成登录再保存
 
-## 开发
+## 截图
+<img width="600" height="493" alt="1" src="https://github.com/user-attachments/assets/1e659aee-83ef-434e-8928-71453f0bd4a3" />
 
-```bash
-# 语法检查
-node --check main.js
-
-# 端到端自测（采集→保存→离线打开→验证 HID）
-# 设置环境变量 E2E=1 后启动
-```
-
-## 许可证
-
-[MIT](./LICENSE)
+<img width="600" height="383" alt="2" src="https://github.com/user-attachments/assets/d0c62894-a68a-40e2-851b-fb5ed2e9b554" />
