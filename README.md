@@ -1,7 +1,7 @@
 # Hid-Drive-Offline-Saver
 # 网页Hid离线保存器
 
-[下载](https://github.com/SadYuyuko/Hid-Drive-Offline-Saver/releases/download/v1.0.0/Hid-Drive-Offline-Saver-win32-x64_v1.0.0.zip) 解压后运行
+[下载](https://github.com/SadYuyuko/Hid-Drive-Offline-Saver/releases/download/v1.0.1/Hid-Drive-Offline-Saver-win32-x64_v1.0.1.zip) 解压后运行
 
 把基于 WebHID（鼠标/键盘/手柄等设备）的网页驱动整站离线保存到本地，之后无需联网即可在软件内离线使用，WebHID 设备控制照常工作。
 

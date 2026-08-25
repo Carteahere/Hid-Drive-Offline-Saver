@@ -24,6 +24,10 @@
   .card .url { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card .meta { font-size: 12px; color: #888; margin-top: 4px; }
   .card button { flex-shrink: 0; }
+  .note { background: #38a169; color: #fff; }
+  .note:hover { background: #2f855a; }
+  .note-input { width: 100%; padding: 8px 10px; border: 1px solid #68d391; border-radius: 6px; font-size: 14px; font-weight: 600; }
+  .url-sub { font-weight: 400; color: #a9a9a9; font-size: 12px; }
   .empty { color: #999; text-align: center; padding: 30px 0; }
   .tip { background: #ebf8ff; border: 1px solid #bee3f8; color: #2c5282; border-radius: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
   code { background: #edf2f7; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
@@ -110,6 +114,10 @@
     return (n / 1024 / 1024).toFixed(1) + ' MB'
   }
 
+  function esc (s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  }
+
   async function refresh () {
     const archives = await window.api.listArchives()
     if (archives.length === 0) {
@@ -117,24 +125,57 @@
       return
     }
     listEl.innerHTML = archives.map(a => `
-      <div class="card">
+      <div class="card" data-id="${a.id}" data-url="${esc(a.entryUrl)}">
         <div class="info">
-          <div class="url">${a.entryUrl}</div>
-          <div class="meta">${new Date(a.capturedAt).toLocaleString()} · ${a.fileCount} 个资源 · ${fmtSize(a.size)}</div>
+          <div class="url" title="${esc(a.entryUrl)}">${a.note ? esc(a.note) : esc(a.entryUrl)}</div>
+          <div class="meta">${new Date(a.capturedAt).toLocaleString()} · ${a.fileCount} 个资源 · ${fmtSize(a.size)}${a.note ? ' · <span class="url-sub">' + esc(a.entryUrl) + '</span>' : ''}</div>
         </div>
+        <button class="note edit" data-id="${a.id}">备注</button>
         <button class="primary open" data-id="${a.id}">打开离线版</button>
         <button class="danger del" data-id="${a.id}">删除</button>
       </div>
     `).join('')
 
     listEl.querySelectorAll('.open').forEach(b => b.addEventListener('click', () => window.api.openArchive(b.dataset.id)))
+    listEl.querySelectorAll('.edit').forEach(b => b.addEventListener('click', () => {
+      const a = archives.find((x) => x.id === b.dataset.id)
+      if (a) editNote(b.closest('.card'), a)
+    }))
     listEl.querySelectorAll('.del').forEach(b => b.addEventListener('click', () => {
-      const url = b.closest('.card').querySelector('.url').textContent
-      askDelete(url, async () => {
+      const card = b.closest('.card')
+      askDelete(card.dataset.url, async () => {
         await window.api.deleteArchive(b.dataset.id)
         refresh()
       })
     }))
+  }
+
+  function editNote (card, a) {
+    const urlEl = card.querySelector('.url')
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = 'note-input'
+    input.value = a.note || ''
+    input.placeholder = a.entryUrl
+    input.title = a.entryUrl
+    urlEl.replaceWith(input)
+    input.focus()
+    input.select()
+
+    let done = false
+    const finish = async (save) => {
+      if (done) return
+      done = true
+      if (save) {
+        await window.api.setNote(a.id, input.value.trim())
+      }
+      refresh()
+    }
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true) }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false) }
+    })
+    input.addEventListener('blur', () => finish(true))
   }
 
   captureBtn.addEventListener('click', async () => {

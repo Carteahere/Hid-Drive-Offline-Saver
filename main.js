@@ -33,6 +33,7 @@ function readArchives () {
       out.push({
         id,
         entryUrl: m.entryUrl,
+        note: m.note || '',
         capturedAt: m.capturedAt,
         fileCount: m.files.length,
         size: m.files.reduce((s, f) => s + f.size, 0)
@@ -275,18 +276,29 @@ async function finalizeCapture () {
 // ---------- offline server ----------
 
 function createOfflineServer (archiveDir, manifest) {
-  const byPath = new Map()
-  const byUrl = new Map()
+  const byPath = new Map() // pathname(+search) -> file, exact match
+  const byPathName = new Map() // pathname only -> file (query-insensitive)
+  const byUrl = new Map() // full url -> file
+
   for (const f of manifest.files) {
     byUrl.set(f.url, f)
     try {
       const u = new URL(f.url)
+      if (!byPathName.has(u.pathname)) byPathName.set(u.pathname, f)
       let p = u.pathname
       if (u.search) p += u.search
       if (!byPath.has(p)) byPath.set(p, f)
       if (u.pathname === '/' && p === '/') byPath.set('/', f)
     } catch (e) {}
   }
+
+  // Entry page: the offline window opens the captured entry URL, and unknown
+  // HTML paths fall back to it (SPA-style), so captures whose entry page is
+  // not at '/' (e.g. https://site/device) still load offline.
+  let entryFile = null
+  try { entryFile = byUrl.get(manifest.entryUrl) || null } catch (e) {}
+  if (!entryFile) entryFile = manifest.files.find((f) => /html/i.test(f.mimeType || '')) || null
+  if (entryFile && !byPath.has('/')) byPath.set('/', entryFile)
 
   const server = http.createServer((req, res) => {
     let reqUrl
@@ -308,7 +320,10 @@ function createOfflineServer (archiveDir, manifest) {
     let key = reqUrl.pathname
     if (reqUrl.search) key += reqUrl.search
     let f = byPath.get(key)
+    if (!f) f = byPathName.get(reqUrl.pathname) // ignore cache-busting query strings
     if (!f && key === '/') f = byPath.get('/')
+    if (!f && entryFile && /text\/html/.test(req.headers.accept || '')) f = entryFile // SPA fallback
+
     if (!f) {
       res.writeHead(404)
       res.end('not found')
@@ -327,7 +342,9 @@ function createOfflineServer (archiveDir, manifest) {
         res.end()
         return
       }
-      res.writeHead(f.status || 200, {
+      // The entry page was often captured with a 404 status from the original
+      // server (SPA shells), but it is a real page offline -> always 200.
+      res.writeHead(f === entryFile ? 200 : (f.status || 200), {
         'Content-Type': f.mimeType || 'application/octet-stream',
         'Content-Length': data.length,
         'Cache-Control': 'no-store',
@@ -338,6 +355,26 @@ function createOfflineServer (archiveDir, manifest) {
   }
 
   return server
+}
+
+// Chromium refuses a fixed set of "unsafe" ports (ERR_UNSAFE_PORT), and the
+// OS-assigned ephemeral port may land on one, so retry until a safe port.
+function listenServer (server, cb) {
+  const restricted = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080])
+  const tryListen = (attempt) => {
+    if (attempt > 50) return cb(new Error('no available port'))
+    const s = server.listen(0, '127.0.0.1')
+    s.once('error', (e) => cb(e))
+    s.once('listening', () => {
+      const port = s.address().port
+      if (restricted.has(port)) {
+        s.close(() => tryListen(attempt + 1))
+      } else {
+        cb(null, port)
+      }
+    })
+  }
+  tryListen(0)
 }
 
 function openOffline (archiveId) {
@@ -352,21 +389,37 @@ function openOffline (archiveId) {
   const server = createOfflineServer(dir, manifest)
   const offlineSession = session.fromPartition('offline-' + archiveId)
 
-  const port = 0
-  server.listen(port, '127.0.0.1', () => {
-    const actualPort = server.address().port
+  listenServer(server, (err, actualPort) => {
+    if (err) {
+      dialog.showErrorBox('错误', '无法启动本地离线服务器: ' + (err && err.message))
+      return
+    }
     const origin = `http://127.0.0.1:${actualPort}`
 
-    // Redirect requests that point back to the original host -> offline copy
+    // Redirect requests that point back to the original host -> offline copy.
+    // Matches by full URL first, then by pathname, so cache-busting query
+    // strings (e.g. ?cachebuster=...) still resolve to the captured copy.
+    const pathNameMap = new Map()
+    for (const f of manifest.files) {
+      try {
+        const p = new URL(f.url).pathname
+        if (!pathNameMap.has(p)) pathNameMap.set(p, f)
+      } catch (e) {}
+    }
+    function findCaptured (url) {
+      const exact = manifest.files.find((x) => x.url === url)
+      if (exact) return exact
+      try { return pathNameMap.get(new URL(url).pathname) || null } catch (e) { return null }
+    }
     offlineSession.webRequest.onBeforeRequest((details, callback) => {
       const u = details.url
       if (u.startsWith(origin)) {
         callback({})
         return
       }
-      const f = manifest.files.find((x) => x.url === u)
+      const f = findCaptured(u)
       if (f) {
-        callback({ redirectURL: `${origin}?u=${encodeURIComponent(u)}` })
+        callback({ redirectURL: `${origin}?u=${encodeURIComponent(f.url)}` })
       } else {
         callback({})
       }
@@ -396,7 +449,13 @@ function openOffline (archiveId) {
       try { server.close() } catch (e) {}
     })
 
-    win.loadURL(origin + '/')
+    // Preserve the captured entry path so the app opens on the same route.
+    let startPath = '/'
+    try {
+      const ep = new URL(manifest.entryUrl)
+      startPath = ep.pathname + ep.search || '/'
+    } catch (e) {}
+    win.loadURL(origin + startPath)
   })
 }
 
@@ -424,6 +483,25 @@ ipcMain.handle('capture:start', async (e, url) => {
 })
 
 ipcMain.handle('archive:list', () => readArchives())
+
+ipcMain.handle('archive:setNote', (e, id, note) => {
+  const dir = path.join(ARCHIVES_DIR, id)
+  const manifestPath = path.join(dir, 'manifest.json')
+  if (!fs.existsSync(manifestPath)) return false
+  try {
+    const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    const text = String(note || '').slice(0, 200)
+    if (!text) delete m.note
+    else m.note = text
+    fs.writeFileSync(manifestPath, JSON.stringify(m, null, 2))
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('archives-changed')
+    }
+    return true
+  } catch (e) {
+    return false
+  }
+})
 
 ipcMain.handle('archive:open', (e, id) => {
   openOffline(id)
